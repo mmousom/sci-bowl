@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  sci-bowl-pdf-etl — SAM template for the Science Bowl PDF ETL pipeline.
+  Orchestrator Lambda fans out S3 PDF keys via SQS; Worker Lambdas process
+  each PDF end-to-end and write structured question records to DynamoDB.
+  NOTE: The DynamoDB table (ScienceBowlQuestions) is pre-existing and is NOT
+  managed by this stack.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    MemorySize: 512
+
+# ---------------------------------------------------------------------------
+# Parameters
+# ---------------------------------------------------------------------------
+Parameters:
+  S3Bucket:
+    Type: String
+    Default: eshaan-sci-bowl-paper
+    Description: S3 bucket containing the raw PDF files.
+
+  S3Prefix:
+    Type: String
+    Default: raw-pdf-vault/middle-school/
+    Description: S3 key prefix under which PDFs are discovered.
+
+  DynamoTableName:
+    Type: String
+    Default: ScienceBowlQuestions
+    Description: Name of the pre-existing DynamoDB table to write questions into.
+
+  DynamoTableArn:
+    Type: String
+    Default: arn:aws:dynamodb:us-east-1:995631985030:table/ScienceBowlQuestions
+    Description: ARN of the pre-existing DynamoDB table (used for IAM policy).
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+Resources:
+
+  # -------------------------------------------------------------------------
+  # SQS — Dead Letter Queue
+  # -------------------------------------------------------------------------
+  PdfProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: sci-bowl-pdf-processing-dlq
+      MessageRetentionPeriod: 1209600   # 14 days
+
+  # -------------------------------------------------------------------------
+  # SQS — Main processing queue
+  # -------------------------------------------------------------------------
+  PdfProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: sci-bowl-pdf-processing
+      VisibilityTimeout: 360            # Must be >= Worker Lambda timeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt PdfProcessingDLQ.Arn
+        maxReceiveCount: 3              # Retry 3× before routing to DLQ
+
+  # -------------------------------------------------------------------------
+  # IAM — S3 read-only (Orchestrator + Worker)
+  # -------------------------------------------------------------------------
+  S3ReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: sci-bowl-s3-read
+      Description: Least-privilege S3 read access for the sci-bowl ETL pipeline.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ListBucket
+            Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !Sub "arn:aws:s3:::${S3Bucket}"
+            Condition:
+              StringLike:
+                s3:prefix: !Sub "${S3Prefix}*"
+          - Sid: GetObject
+            Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${S3Bucket}/${S3Prefix}*"
+
+  # -------------------------------------------------------------------------
+  # IAM — SQS send (Orchestrator only)
+  # -------------------------------------------------------------------------
+  SqsSendPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: sci-bowl-sqs-send
+      Description: Least-privilege SQS send access for the Orchestrator Lambda.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SendMessage
+            Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt PdfProcessingQueue.Arn
+
+  # -------------------------------------------------------------------------
+  # IAM — SQS consume (Worker only)
+  # -------------------------------------------------------------------------
+  SqsConsumePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: sci-bowl-sqs-consume
+      Description: Least-privilege SQS consume access for the Worker Lambda.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConsumeMessages
+            Effect: Allow
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+              - sqs:ChangeMessageVisibility
+            Resource: !GetAtt PdfProcessingQueue.Arn
+
+  # -------------------------------------------------------------------------
+  # IAM — DynamoDB write (Worker only) — references pre-existing table
+  # -------------------------------------------------------------------------
+  DynamoWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: sci-bowl-dynamo-write
+      Description: Least-privilege DynamoDB write access for the Worker Lambda.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PutItem
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource:
+              - !Ref DynamoTableArn
+              - !Sub "${DynamoTableArn}/index/*"
+
+  # -------------------------------------------------------------------------
+  # IAM — Bedrock invoke (Worker only)
+  # -------------------------------------------------------------------------
+  BedrockInvokePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: sci-bowl-bedrock-invoke
+      Description: Least-privilege Bedrock model invocation access for the Worker Lambda.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: InvokeFoundationModels
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource:
+              # Foundation model ARNs (any region, for cross-region routing)
+              - arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4*
+              - arn:aws:bedrock:*::foundation-model/anthropic.claude-3-haiku-*
+              - arn:aws:bedrock:*::foundation-model/amazon.nova-micro-*
+              # Cross-region inference profile ARNs (account-scoped)
+              - !Sub "arn:aws:bedrock:us-east-1:${AWS::AccountId}:inference-profile/us.anthropic.claude-haiku-4*"
+              - !Sub "arn:aws:bedrock:us-east-1:${AWS::AccountId}:inference-profile/us.anthropic.claude-3-haiku-*"
+              - !Sub "arn:aws:bedrock:us-east-1:${AWS::AccountId}:inference-profile/us.amazon.nova-micro*"
+
+  # -------------------------------------------------------------------------
+  # Lambda — Worker
+  # -------------------------------------------------------------------------
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildProperties:
+        UseContainer: false
+        RequirementsFile: requirements-lambda.txt
+    Properties:
+      FunctionName: sci-bowl-worker
+      CodeUri: ./lambda
+      Handler: src/worker/handler.handler
+      Timeout: 360                          # 6 minutes
+      # ReservedConcurrentExecutions omitted — account limit is 10, which is
+      # too low to reserve any without dropping unreserved below the minimum.
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref S3Bucket
+          DYNAMO_TABLE: !Ref DynamoTableName
+      Policies:
+        - !Ref S3ReadPolicy
+        - !Ref SqsConsumePolicy
+        - !Ref DynamoWritePolicy
+        - !Ref BedrockInvokePolicy
+      Events:
+        SqsTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PdfProcessingQueue.Arn
+            BatchSize: 1                    # One PDF per invocation
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  # -------------------------------------------------------------------------
+  # Lambda — Orchestrator
+  # -------------------------------------------------------------------------
+  OrchestratorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildProperties:
+        UseContainer: false
+        RequirementsFile: requirements-lambda.txt
+    Properties:
+      FunctionName: sci-bowl-orchestrator
+      CodeUri: ./lambda
+      Handler: src/orchestrator/handler.handler
+      Timeout: 300
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref S3Bucket
+          S3_PREFIX: !Ref S3Prefix
+          SQS_QUEUE_URL: !Ref PdfProcessingQueue
+      Policies:
+        - !Ref S3ReadPolicy
+        - !Ref SqsSendPolicy
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+Outputs:
+  PdfProcessingQueueUrl:
+    Description: URL of the SQS PDF processing queue.
+    Value: !Ref PdfProcessingQueue
+
+  PdfProcessingQueueArn:
+    Description: ARN of the SQS PDF processing queue.
+    Value: !GetAtt PdfProcessingQueue.Arn
+
+  PdfProcessingDLQUrl:
+    Description: URL of the SQS dead letter queue.
+    Value: !Ref PdfProcessingDLQ
+
+  PdfProcessingDLQArn:
+    Description: ARN of the SQS dead letter queue.
+    Value: !GetAtt PdfProcessingDLQ.Arn
+
+  WorkerFunctionArn:
+    Description: ARN of the Worker Lambda function.
+    Value: !GetAtt WorkerFunction.Arn
+
+  OrchestratorFunctionArn:
+    Description: ARN of the Orchestrator Lambda function.
+    Value: !GetAtt OrchestratorFunction.Arn

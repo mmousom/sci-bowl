@@ -1,0 +1,25 @@
+# Next.js frontend — not part of the Lambda package
+web/
+
+# Python virtual environment
+venv/
+
+# Test suite and test dependencies
+tests/
+.hypothesis/
+.pytest_cache/
+
+# Development and editor artifacts
+.vscode/
+.git/
+.aws-sam/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Documentation and config not needed at runtime
+*.md
+*.toml
+*.ini
+samconfig.toml
