@@ -89,10 +89,13 @@ function useRounds(): { state: RoundsState; retry: () => void } {
 }
 
 /** How many questions to fetch per batch. */
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 200;
 
 /** Refetch when the local queue drops to this many remaining. */
-const REFETCH_THRESHOLD = 5;
+const REFETCH_THRESHOLD = 10;
+
+/** How many recently-seen Question_Ids to remember for deduplication. */
+const SEEN_HISTORY_LIMIT = 200;
 
 /** Builds the batch fetch URL for a given filter. */
 function buildBatchUrl(filter: PracticeFilter): string {
@@ -118,9 +121,10 @@ async function fetchBatch(
 
 /**
  * Manages a local question queue.
- * Fetches a batch of up to 50 shuffled questions on load/filter change,
+ * Fetches a batch of up to BATCH_SIZE shuffled questions on load/filter change,
  * serves them in sequence (no repeats within a batch), and refetches
  * in the background when the queue drops below REFETCH_THRESHOLD.
+ * Tracks recently-seen Question_Ids to avoid cross-batch repeats.
  */
 function useQuestion(): {
   state: QuestionState;
@@ -131,6 +135,22 @@ function useQuestion(): {
   const queueRef = useRef<QuestionResponse[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const filterRef = useRef<PracticeFilter | null>(null);
+  const seenIdsRef = useRef<string[]>([]);
+
+  /**
+   * Removes questions already in the seen-history from a batch,
+   * then records the remaining ones as seen (capped at SEEN_HISTORY_LIMIT).
+   */
+  const deduplicateBatch = (batch: QuestionResponse[]): QuestionResponse[] => {
+    const seenSet = new Set(seenIdsRef.current);
+    const fresh = batch.filter((q) => !seenSet.has(q.Question_Id));
+    // Fall back to the full batch if everything was already seen (small pool)
+    const result = fresh.length > 0 ? fresh : batch;
+    const incoming = result.map((q) => q.Question_Id);
+    const combined = [...seenIdsRef.current, ...incoming];
+    seenIdsRef.current = combined.slice(-SEEN_HISTORY_LIMIT);
+    return result;
+  };
 
   /** Pops the next question from the queue and updates state. */
   const popNext = () => {
@@ -149,7 +169,7 @@ function useQuestion(): {
       .then((batch) => {
         if (signal.aborted) return;
         if (batch.length === 0) { setState({ status: "not_found" }); return; }
-        queueRef.current = batch;
+        queueRef.current = deduplicateBatch(batch);
         popNext();
       })
       .catch((err: unknown) => {
@@ -163,14 +183,14 @@ function useQuestion(): {
     const controller = new AbortController();
     abortRef.current = controller;
     filterRef.current = filter;
-    queueRef.current = []; // clear stale queue on filter change
+    queueRef.current = [];
+    seenIdsRef.current = []; // reset history on filter change
     fetchAndPop(filter, controller.signal);
   };
 
   /** Called by the page on Next/Skip — pops from queue, refetches if low. */
   const advance = () => {
     if (queueRef.current.length === 0 && filterRef.current) {
-      // Queue exhausted — fetch a new batch
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -187,7 +207,9 @@ function useQuestion(): {
       const bgController = new AbortController();
       fetchBatch(filter, bgController.signal)
         .then((batch) => {
-          if (batch.length > 0) queueRef.current.push(...batch);
+          if (batch.length > 0) {
+            queueRef.current.push(...deduplicateBatch(batch));
+          }
         })
         .catch(() => { /* silent background failure */ });
     }

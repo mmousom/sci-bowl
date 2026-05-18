@@ -235,7 +235,7 @@ function SetGroup({
   );
 }
 
-/** Inline PDF viewer modal. */
+/** Inline PDF viewer modal — desktop only. On mobile, opens in a new tab. */
 function PdfViewerModal({
   state,
   onClose,
@@ -274,11 +274,28 @@ function PdfViewerModal({
           </div>
         )}
         {state.status === "open" && (
-          <iframe
-            src={state.url}
-            className="h-full w-full border-0"
-            title={state.entry.round}
-          />
+          <>
+            {/* Desktop: inline iframe */}
+            <iframe
+              src={state.url}
+              className="hidden md:block h-full w-full border-0"
+              title={state.entry.round}
+            />
+            {/* Mobile: iframe is unreliable — show an open-in-browser fallback */}
+            <div className="md:hidden flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+              <p className="text-sm text-gray-300">
+                PDF preview is not supported in mobile browsers.
+              </p>
+              <a
+                href={state.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              >
+                Open PDF
+              </a>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -318,9 +335,13 @@ export default function SimulationPage() {
   const grouped = useMemo(() => groupBySet(filtered), [filtered]);
 
   const handleView = async (entry: PdfEntry) => {
-    setViewer({ status: "loading", entry });
     try {
       const url = await fetchPresignedUrl(entry.key, "inline");
+      // On mobile, iframes are unreliable — open directly in the browser
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
       setViewer({ status: "open", entry, url });
     } catch {
       setViewer({ status: "error", entry });

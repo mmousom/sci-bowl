@@ -6,6 +6,33 @@ import type { QuestionResponse } from "@/lib/types";
 /** Labels for the four multiple choice answer slots. */
 const MC_LABELS = ["W", "X", "Y", "Z"] as const;
 
+/**
+ * Parses a Science Bowl answer string into a list of accepted values.
+ *
+ * Handles the common format: `CsF (ACCEPT: CESIUM FLUORIDE)`
+ * Returns the primary answer plus any alternatives listed after "ACCEPT:".
+ */
+function parseAcceptedAnswers(raw: string): string[] {
+  const acceptMatch = raw.match(/^(.*?)\s*\(ACCEPT:\s*(.*?)\)\s*$/i);
+  if (!acceptMatch) return [raw.trim()];
+
+  const primary = acceptMatch[1].trim();
+  const alternatives = acceptMatch[2]
+    .split(/\s*(?:OR|;)\s*/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  return [primary, ...alternatives];
+}
+
+/** Returns true if the user's input matches any accepted answer (case-insensitive). */
+function isAnswerCorrect(userInput: string, storedAnswer: string): boolean {
+  const normalized = userInput.trim().toLowerCase();
+  return parseAcceptedAnswers(storedAnswer).some(
+    (accepted) => accepted.toLowerCase() === normalized
+  );
+}
+
 /** Props for the QuestionWorkspace component. */
 interface QuestionWorkspaceProps {
   question: QuestionResponse;
@@ -126,17 +153,12 @@ export default function QuestionWorkspace({
   }, [question]);
 
   const evaluateShortAnswer = () => {
-    const isCorrect =
-      shortAnswerText.trim().toLowerCase() ===
-      question.answer.trim().toLowerCase();
-    onAnswerSubmit(isCorrect);
+    onAnswerSubmit(isAnswerCorrect(shortAnswerText, question.answer));
   };
 
   const evaluateMultipleChoice = (index: number) => {
     const selected = question.answer_choices[index];
-    const isCorrect =
-      selected.trim().toLowerCase() === question.answer.trim().toLowerCase();
-    onAnswerSubmit(isCorrect);
+    onAnswerSubmit(isAnswerCorrect(selected, question.answer));
   };
 
   return (

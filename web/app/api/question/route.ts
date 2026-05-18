@@ -46,7 +46,7 @@ async function queryAll(input: QueryCommandInput): Promise<DynamoQuestion[]> {
 }
 
 /** Number of questions to fetch per batch. */
-const BATCH_SIZE = 50;
+const BATCH_SIZE = 200;
 
 /** Shuffles an array in-place using Fisher-Yates. */
 function shuffle<T>(arr: T[]): T[] {
