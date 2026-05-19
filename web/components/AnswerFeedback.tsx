@@ -1,5 +1,7 @@
 "use client";
 
+import MathText from "@/components/MathText";
+
 /** Props for the AnswerFeedback overlay component. */
 interface AnswerFeedbackProps {
   isCorrect: boolean;
@@ -26,7 +28,11 @@ function StyledFeedback({ isCorrect, correctAnswer, onNext }: AnswerFeedbackProp
   return (
     <div className={`rounded-lg border-2 ${borderColor} ${bgColor} p-4 flex flex-col gap-3`}>
       <p className={`text-lg font-semibold ${textColor}`}>
-        {isCorrect ? "Correct!" : `Incorrect — the correct answer is: ${correctAnswer}`}
+        {isCorrect ? (
+          "Correct!"
+        ) : (
+          <>Incorrect — the correct answer is: <MathText text={correctAnswer} /></>
+        )}
       </p>
       <button
         onClick={onNext}

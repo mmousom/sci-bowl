@@ -55,7 +55,14 @@ def buildPrompt(chunk: str, answerFormat: str) -> str:
         "2. Do NOT return a JSON array — return a single JSON object.\n"
         "3. All three fields are required and must be non-null and non-empty "
         "(except `answer_choices` which may be [] for Short Answer).\n"
-        "4. Preserve the original wording; do not paraphrase.\n\n"
+        "4. Preserve the original wording; do not paraphrase.\n"
+        "5. LaTeX formatting: whenever you encounter mathematical expressions, "
+        "chemical formulas, scientific notation, Greek letters, subscripts, "
+        "superscripts, or any symbolic notation, render them using LaTeX syntax "
+        "wrapped in single dollar-sign delimiters for inline math (e.g. $E = mc^2$, "
+        "$H_2O$, $\\\\alpha$, $6.02 \\\\times 10^{23}$). Use double dollar signs "
+        "$$...$$ only for standalone display equations. Plain prose must remain "
+        "as plain text — only mathematical/scientific notation gets LaTeX markup.\n\n"
         "Question text:\n"
         "---\n"
         f"{chunk}\n"
@@ -112,6 +119,27 @@ def parseBedrockResponse(responseBody: str) -> dict[str, str | list[str]]:
     }
 
 
+def _stripMarkdownFence(text: str) -> str:
+    """Remove markdown code fences if the model wrapped its JSON response.
+
+    Handles both ```json ... ``` and ``` ... ``` variants.
+
+    Args:
+        text: Raw response string from the model.
+
+    Returns:
+        The response with any surrounding code fence stripped.
+    """
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3].rstrip()
+    return stripped
+
+
 def _extractJsonObject(text: str) -> str:
     """Extract the first complete JSON object or array from a string.
 
@@ -157,26 +185,6 @@ def _extractJsonObject(text: str) -> str:
                     return stripped[start:i + 1]
 
     raise ValueError("No JSON object or array found in response")
-    """Remove markdown code fences if the model wrapped its JSON response.
-
-    Handles both ```json ... ``` and ``` ... ``` variants.
-
-    Args:
-        text: Raw response string from the model.
-
-    Returns:
-        The response with any surrounding code fence stripped.
-    """
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        # Drop the opening fence line (e.g. ```json or ```)
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1:]
-        # Drop the closing fence
-        if stripped.endswith("```"):
-            stripped = stripped[:-3].rstrip()
-    return stripped
 
 
 def _validateField(data: dict, fieldName: str, rawResponse: str) -> None:

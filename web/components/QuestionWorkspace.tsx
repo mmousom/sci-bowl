@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { QuestionResponse } from "@/lib/types";
+import MathText, { normalizeForComparison } from "@/components/MathText";
 
 /** Labels for the four multiple choice answer slots. */
 const MC_LABELS = ["W", "X", "Y", "Z"] as const;
@@ -25,11 +26,11 @@ function parseAcceptedAnswers(raw: string): string[] {
   return [primary, ...alternatives];
 }
 
-/** Returns true if the user's input matches any accepted answer (case-insensitive). */
+/** Returns true if the user's input matches any accepted answer (case-insensitive, LaTeX-stripped). */
 function isAnswerCorrect(userInput: string, storedAnswer: string): boolean {
-  const normalized = userInput.trim().toLowerCase();
+  const normalized = normalizeForComparison(userInput);
   return parseAcceptedAnswers(storedAnswer).some(
-    (accepted) => accepted.toLowerCase() === normalized
+    (accepted) => normalizeForComparison(accepted) === normalized
   );
 }
 
@@ -75,7 +76,7 @@ function MultipleChoiceInput({
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 dark:bg-primary/30 text-sm font-bold text-primary dark:text-blue-300">
             {MC_LABELS[i]}
           </span>
-          <span className="text-sm leading-snug">{choice}</span>
+          <MathText text={choice} className="text-sm leading-snug" />
         </button>
       ))}
     </div>
@@ -104,29 +105,43 @@ function ShortAnswerInput({
     if (e.key === "Enter" && !isAnswered) onSubmit();
   };
 
+  /** Wrap the raw input in $...$ so MathText renders it as inline math. */
+  const hasLatex = value.trim().length > 0 && value.includes("\\");
+  const previewText = hasLatex ? `$${value}$` : "";
+
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={isAnswered}
-        placeholder="Type your answer…"
-        className="flex-1 rounded-lg border border-primary/30 bg-white dark:bg-white/5 dark:border-white/10
-          px-4 py-2.5 text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500
-          outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20
-          disabled:cursor-not-allowed disabled:opacity-60"
-      />
-      <button
-        onClick={onSubmit}
-        disabled={isAnswered || value.trim() === ""}
-        className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white
-          transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Submit
-      </button>
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={isAnswered}
+          placeholder="Type your answer… (LaTeX ok, e.g. \pi)"
+          className="flex-1 rounded-lg border border-primary/30 bg-white dark:bg-white/5 dark:border-white/10
+            px-4 py-2.5 text-sm text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500
+            outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20
+            disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <button
+          onClick={onSubmit}
+          disabled={isAnswered || value.trim() === ""}
+          className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-white
+            transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Submit
+        </button>
+      </div>
+
+      {/* Live LaTeX preview — only shown when input contains a backslash */}
+      {hasLatex && (
+        <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 dark:bg-primary/10 px-3 py-1.5">
+          <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Preview:</span>
+          <MathText text={previewText} className="text-sm text-gray-800 dark:text-gray-100" />
+        </div>
+      )}
     </div>
   );
 }
@@ -170,9 +185,10 @@ export default function QuestionWorkspace({
       </div>
 
       {/* Question stem */}
-      <p className="text-base font-medium leading-relaxed text-gray-800 dark:text-gray-100">
-        {question.question_stem}
-      </p>
+      <MathText
+        text={question.question_stem}
+        className="text-base font-medium leading-relaxed text-gray-800 dark:text-gray-100"
+      />
 
       {/* Answer input — exactly one type rendered at a time */}
       {question.answer_format === "Multiple Choice" ? (

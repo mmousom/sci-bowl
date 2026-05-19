@@ -7,21 +7,31 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 CANONICAL_CATEGORIES: frozenset[str] = frozenset({
-    "Life Science",
-    "Earth and Space",
-    "Earth and Space Science",
-    "Physical Science",
-    "Mathematics",
-    "Energy",
-    "Earth Science",
-    "General Science",
-    "Math",
-    "Chemistry",
     "Biology",
+    "Chemistry",
+    "Computer Science",
+    "Earth and Space Science",
+    "Energy",
+    "General Science",
+    "Life Science",
+    "Mathematics",
+    "Physical Science",
     "Physics",
     "Astronomy",
-    "Computer Science",
 })
+
+# Maps any known alias (lowercased) to its canonical form.
+# Add new aliases here as new PDF sets introduce variant spellings.
+_CATEGORY_ALIASES: dict[str, str] = {
+    # Earth variants
+    "earth science":             "Earth and Space Science",
+    "earth and space":           "Earth and Space Science",
+    "earth & space":             "Earth and Space Science",
+    "earth & space science":     "Earth and Space Science",
+    # Math variants
+    "math":                      "Mathematics",
+    "maths":                     "Mathematics",
+}
 
 # Regex patterns for structural field extraction
 _MATCH_TYPE_PATTERN = re.compile(r"^(TOSS-UP|BONUS)", re.MULTILINE)
@@ -129,10 +139,11 @@ def parseStructuralFields(chunk: str) -> dict[str, str]:
 
     rawCategory = _extractCategory(categoryLine)
     if not rawCategory:
-        logger.error(
-            "parseStructuralFields: missing field=category chunk=%.500s", chunk
+        logger.warning(
+            "parseStructuralFields: category not found, defaulting to 'General Science'. "
+            "chunk=%.500s", chunk
         )
-        raise ValueError("Missing field: category")
+        rawCategory = "General Science"
 
     category = normalizeCategory(rawCategory)
 
@@ -147,18 +158,18 @@ def parseStructuralFields(chunk: str) -> dict[str, str]:
 def normalizeCategory(raw: str) -> str:
     """Normalise a raw category string to its canonical title-case form.
 
-    Performs a case-insensitive lookup against ``CANONICAL_CATEGORIES``.
-    Falls back to a prefix/substring match so that variants like
-    ``"EARTH AND SPACE SCIENCE"`` resolve to ``"Earth and Space Science"``
-    even if the exact string isn't in the canonical set.
+    Resolution order:
+    1. Alias map lookup (case-insensitive) — handles known variant spellings.
+    2. Exact case-insensitive match against CANONICAL_CATEGORIES.
+    3. Unknown category — stored as title-cased raw value so no question is
+       dropped; a warning is logged so new variants can be added to the alias
+       map on the next ETL run.
 
     Args:
         raw: The raw category string extracted from a PDF chunk.
 
     Returns:
-        The canonical category name, or the title-cased raw value if no
-        canonical match is found (to avoid dropping questions on unknown
-        categories).
+        The canonical category name, or title-cased raw value if unknown.
 
     Raises:
         ValueError: If the value is empty after stripping.
@@ -169,23 +180,22 @@ def normalizeCategory(raw: str) -> str:
 
     lowerRaw = stripped.lower()
 
-    # Exact case-insensitive match
+    # 1. Alias map — explicit variant → canonical mapping
+    if lowerRaw in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[lowerRaw]
+
+    # 2. Exact case-insensitive match against canonical set
     for canonical in CANONICAL_CATEGORIES:
         if canonical.lower() == lowerRaw:
             return canonical
 
-    # Prefix match — e.g. "Earth and Space Science" starts with "Earth and Space"
-    for canonical in CANONICAL_CATEGORIES:
-        if lowerRaw.startswith(canonical.lower()) or canonical.lower().startswith(lowerRaw):
-            logger.warning(
-                "normalizeCategory: fuzzy match raw=%r -> canonical=%r", raw, canonical
-            )
-            return canonical
-
-    # Unknown but non-empty — store as title-case rather than dropping the question
+    # 3. Unknown — store as title-case, log for future alias addition
     titleCased = stripped.title()
     logger.warning(
-        "normalizeCategory: unknown category raw=%r, storing as %r", raw, titleCased
+        "normalizeCategory: unknown category raw=%r, storing as %r — "
+        "add to _CATEGORY_ALIASES if this is a known variant",
+        raw,
+        titleCased,
     )
     return titleCased
 
