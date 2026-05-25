@@ -11,6 +11,7 @@
     "test:ci": "jest --runInBand --ci --coverage"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "3.1048.0",
     "@aws-sdk/client-dynamodb": "3.1048.0",
     "@aws-sdk/client-s3": "^3.1048.0",
     "@aws-sdk/credential-providers": "3.1048.0",

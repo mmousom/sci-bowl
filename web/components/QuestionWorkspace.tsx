@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { QuestionResponse } from "@/lib/types";
 import MathText, { normalizeForComparison } from "@/components/MathText";
+import ExplanationPanel from "@/components/ExplanationPanel";
 
 /** Labels for the four multiple choice answer slots. */
 const MC_LABELS = ["W", "X", "Y", "Z"] as const;
@@ -146,6 +147,13 @@ function ShortAnswerInput({
   );
 }
 
+/** Possible states for the explanation fetch. */
+type ExplainState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "loaded"; explanation: string }
+  | { status: "error" };
+
 /**
  * Displays the current question and collects the student's answer.
  *
@@ -154,6 +162,9 @@ function ShortAnswerInput({
  * Answer text input — based on `question.answer_format`. All answer state
  * is cleared whenever the `question` prop changes. Calls `onAnswerSubmit`
  * with a boolean indicating correctness after evaluation.
+ *
+ * Also renders a "Learn More" button that fetches a Bedrock-generated
+ * explanation for the current question on demand.
  */
 export default function QuestionWorkspace({
   question,
@@ -161,11 +172,65 @@ export default function QuestionWorkspace({
   isAnswered,
 }: QuestionWorkspaceProps) {
   const [shortAnswerText, setShortAnswerText] = useState("");
+  const [explainState, setExplainState] = useState<ExplainState>({ status: "idle" });
+  const explainAbortRef = useRef<AbortController | null>(null);
 
-  // Clear answer state whenever the question changes (Requirement 3.5)
+  // Clear answer state and explanation whenever the question changes
   useEffect(() => {
     setShortAnswerText("");
+    explainAbortRef.current?.abort();
+    explainAbortRef.current = null;
+    setExplainState({ status: "idle" });
   }, [question]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { explainAbortRef.current?.abort(); };
+  }, []);
+
+  const fetchExplanation = () => {
+    explainAbortRef.current?.abort();
+    const controller = new AbortController();
+    explainAbortRef.current = controller;
+    setExplainState({ status: "loading" });
+
+    fetch("/api/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question_stem: question.question_stem,
+        answer: question.answer,
+        Category: question.Category,
+        MatchType: question.MatchType,
+      }),
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as { explanation: string };
+        setExplainState({ status: "loaded", explanation: data.explanation });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setExplainState({ status: "error" });
+      });
+  };
+
+  const handleLearnMore = () => {
+    if (explainState.status === "loading") return;
+    // Toggle: if panel is visible, dismiss it
+    if (explainState.status === "loaded" || explainState.status === "error") {
+      setExplainState({ status: "idle" });
+      return;
+    }
+    fetchExplanation();
+  };
+
+  const handleDismiss = () => {
+    explainAbortRef.current?.abort();
+    explainAbortRef.current = null;
+    setExplainState({ status: "idle" });
+  };
 
   const evaluateShortAnswer = () => {
     onAnswerSubmit(isAnswerCorrect(shortAnswerText, question.answer));
@@ -176,33 +241,76 @@ export default function QuestionWorkspace({
     onAnswerSubmit(isAnswerCorrect(selected, question.answer));
   };
 
+  const isPanelVisible =
+    explainState.status === "loading" ||
+    explainState.status === "loaded" ||
+    explainState.status === "error";
+
+  const isLearnMoreLoading = explainState.status === "loading";
+
   return (
-    <div className="flex flex-col gap-5 rounded-xl border border-primary/10 dark:border-white/10 bg-white dark:bg-white/5 p-6 shadow-sm">
-      {/* Metadata labels */}
-      <div className="flex flex-wrap gap-2">
-        <MetaLabel label="Category" value={question.Category} />
-        <MetaLabel label="Type" value={question.MatchType} />
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5 rounded-xl border border-primary/10 dark:border-white/10 bg-white dark:bg-white/5 p-6 shadow-sm">
+        {/* Metadata labels */}
+        <div className="flex flex-wrap gap-2">
+          <MetaLabel label="Category" value={question.Category} />
+          <MetaLabel label="Type" value={question.MatchType} />
+        </div>
+
+        {/* Question stem */}
+        <MathText
+          text={question.question_stem}
+          className="text-base font-medium leading-relaxed text-gray-800 dark:text-gray-100"
+        />
+
+        {/* Answer input — exactly one type rendered at a time */}
+        {question.answer_format === "Multiple Choice" ? (
+          <MultipleChoiceInput
+            choices={question.answer_choices}
+            onSelect={evaluateMultipleChoice}
+            isAnswered={isAnswered}
+          />
+        ) : (
+          <ShortAnswerInput
+            value={shortAnswerText}
+            onChange={setShortAnswerText}
+            onSubmit={evaluateShortAnswer}
+            isAnswered={isAnswered}
+          />
+        )}
+
+        {/* Learn More button */}
+        <div className="flex justify-start">
+          <button
+            onClick={handleLearnMore}
+            disabled={isLearnMoreLoading}
+            aria-label={isPanelVisible && !isLearnMoreLoading ? "Hide explanation" : "Learn more about this topic"}
+            className="inline-flex items-center gap-2 rounded-md border border-primary/30 px-4 py-2 text-sm font-medium text-primary
+              hover:bg-primary/5 dark:hover:bg-primary/20 transition-colors
+              disabled:cursor-not-allowed disabled:opacity-60
+              focus:outline-none focus:ring-2 focus:ring-primary/30"
+          >
+            {isLearnMoreLoading ? (
+              <>
+                <span
+                  className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent"
+                  aria-hidden="true"
+                />
+                Loading…
+              </>
+            ) : (
+              "Learn More"
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Question stem */}
-      <MathText
-        text={question.question_stem}
-        className="text-base font-medium leading-relaxed text-gray-800 dark:text-gray-100"
-      />
-
-      {/* Answer input — exactly one type rendered at a time */}
-      {question.answer_format === "Multiple Choice" ? (
-        <MultipleChoiceInput
-          choices={question.answer_choices}
-          onSelect={evaluateMultipleChoice}
-          isAnswered={isAnswered}
-        />
-      ) : (
-        <ShortAnswerInput
-          value={shortAnswerText}
-          onChange={setShortAnswerText}
-          onSubmit={evaluateShortAnswer}
-          isAnswered={isAnswered}
+      {/* Explanation panel — rendered below the workspace card */}
+      {isPanelVisible && (
+        <ExplanationPanel
+          state={explainState}
+          onDismiss={handleDismiss}
+          onRetry={fetchExplanation}
         />
       )}
     </div>
