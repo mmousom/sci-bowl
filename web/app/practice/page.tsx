@@ -357,7 +357,7 @@ export default function PracticePage() {
   const rounds = roundsState.status === "loaded" ? roundsState.rounds : [];
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-6 py-6">
+    <div className="mx-auto flex max-w-2xl flex-col gap-6 py-6 pb-32 md:pb-6">
       {/* Score */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-primary">Practice</h1>
