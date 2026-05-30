@@ -139,7 +139,12 @@ export default async function StatsPage() {
                         </p>
                         <p className="text-xs text-gray-400">{formatDate(s.startTime)}</p>
                       </div>
-                      <span className="text-sm text-gray-500">{durationMin}m</span>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-sm text-gray-500">{durationMin}m</span>
+                        <span className="text-xs text-gray-400">
+                          {s.questionCount} {s.questionCount === 1 ? "question" : "questions"}
+                        </span>
+                      </div>
                     </li>
                   );
                 })}
