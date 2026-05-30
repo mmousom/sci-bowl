@@ -2,10 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
 
 /** Design token for the nav border colour. */
 const BORDER_COLOR_LIGHT = "#d9d9e4";
 const BORDER_COLOR_DARK = "#2a2a3a";
+
+const STATS_ICON_PATH =
+  "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z";
 
 interface NavItem {
   href: string;
@@ -14,47 +18,39 @@ interface NavItem {
   iconPath: string;
 }
 
-/** Nav items shown in the desktop top bar. */
-const DESKTOP_NAV_ITEMS: NavItem[] = [
+/** Nav items always shown in the desktop top bar. */
+const DESKTOP_NAV_ITEMS_BASE: NavItem[] = [
   {
     href: "/practice",
     label: "Practice",
-    iconPath:
-      "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+    iconPath: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
   },
   {
     href: "/simulation",
     label: "Simulation",
     iconPath:
       "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
-  },
-  {
-    href: "/stats",
-    label: "Stats",
-    iconPath:
-      "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   },
 ];
 
-/** Nav items shown in the mobile bottom bar. */
-const MOBILE_NAV_ITEMS: NavItem[] = [
+const STATS_NAV_ITEM: NavItem = {
+  href: "/stats",
+  label: "Stats",
+  iconPath: STATS_ICON_PATH,
+};
+
+/** Nav items always shown in the mobile bottom bar. */
+const MOBILE_NAV_ITEMS_BASE: NavItem[] = [
   {
     href: "/practice",
     label: "Practice",
-    iconPath:
-      "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
+    iconPath: "M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5",
   },
   {
     href: "/simulation",
     label: "Simulation",
     iconPath:
       "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
-  },
-  {
-    href: "/stats",
-    label: "Stats",
-    iconPath:
-      "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z",
   },
   {
     href: "/profile",
@@ -83,15 +79,28 @@ function NavIcon({ path }: { path: string }) {
 
 /**
  * Responsive navigation component.
- * - Mobile (< 768px): fixed bottom bar with icon + label for Practice, Stats, Profile.
+ * - Mobile (< 768px): fixed bottom bar with icon + label.
  * - Desktop (≥ 768px): sticky top bar with BowlPrep brand logo left, nav links centred.
+ * - When authenticated: shows Stats link, user display name, and Sign Out button.
+ * - When unauthenticated: hides Stats link and user info.
  */
 export default function Nav() {
   const pathname = usePathname();
+  const { data: session, status } = useSession();
+  const isAuthenticated = status === "authenticated";
+
   const isDark =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-color-scheme: dark)").matches;
   const borderColor = isDark ? BORDER_COLOR_DARK : BORDER_COLOR_LIGHT;
+
+  const desktopNavItems = isAuthenticated
+    ? [...DESKTOP_NAV_ITEMS_BASE, STATS_NAV_ITEM]
+    : DESKTOP_NAV_ITEMS_BASE;
+
+  const mobileNavItems = isAuthenticated
+    ? [MOBILE_NAV_ITEMS_BASE[0], STATS_NAV_ITEM, ...MOBILE_NAV_ITEMS_BASE.slice(1)]
+    : MOBILE_NAV_ITEMS_BASE;
 
   return (
     <>
@@ -110,7 +119,7 @@ export default function Nav() {
           className="absolute left-1/2 -translate-x-1/2 flex items-center gap-8"
           aria-label="Main navigation"
         >
-          {DESKTOP_NAV_ITEMS.map(({ href, label }) => {
+          {desktopNavItems.map(({ href, label }) => {
             const isActive = pathname.startsWith(href);
             return (
               <Link
@@ -129,6 +138,21 @@ export default function Nav() {
             );
           })}
         </nav>
+
+        {/* Auth area — right side */}
+        {isAuthenticated && (
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-sm text-gray-600 dark:text-gray-300">
+              {session?.user?.name}
+            </span>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary/30 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Sign Out
+            </button>
+          </div>
+        )}
       </header>
 
       {/* ── Mobile bottom bar ── */}
@@ -137,7 +161,7 @@ export default function Nav() {
         style={{ borderTop: `1px solid ${borderColor}` }}
         aria-label="Main navigation"
       >
-        {MOBILE_NAV_ITEMS.map(({ href, label, iconPath }) => {
+        {mobileNavItems.map(({ href, label, iconPath }) => {
           const isActive = pathname.startsWith(href);
           return (
             <Link

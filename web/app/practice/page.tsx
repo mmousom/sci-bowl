@@ -6,6 +6,7 @@ import QuestionWorkspace from "@/components/QuestionWorkspace";
 import AnswerFeedback from "@/components/AnswerFeedback";
 import ScoreDisplay from "@/components/ScoreDisplay";
 import { readScore, writeScore } from "@/lib/score";
+import { useSessionTracker } from "@/lib/useSessionTracker";
 import type {
   AnswerFormatFilter,
   PracticeFilter,
@@ -296,12 +297,16 @@ export default function PracticePage() {
   const { state: catState, retry: retryCategories } = useCategories();
   const { state: roundsState } = useRounds();
   const { state: qState, load: loadQuestion, advance } = useQuestion();
+  const { startSession, incrementQuestion } = useSessionTracker();
 
-  // Fetch a new question whenever the filter changes (including on mount)
+  // Fetch a new question and start a session whenever the filter category changes
   useEffect(() => {
     setIsAnswered(false);
     setLastCorrect(null);
     loadQuestion(filter);
+    if (filter.category !== "All Categories") {
+      startSession(filter.category);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
@@ -326,6 +331,7 @@ export default function PracticePage() {
     const updated = isCorrect ? applyCorrect(score) : applyIncorrect(score);
     setScore(updated);
     writeScore(updated);
+    incrementQuestion();
     setIsAnswered(true);
     setLastCorrect(isCorrect);
   };

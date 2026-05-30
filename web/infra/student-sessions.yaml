@@ -1,0 +1,36 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: StudentSessions DynamoDB table for BowlPrep session tracking.
+
+Resources:
+  StudentSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: StudentSessions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: studentId
+          AttributeType: S
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: startTime
+          AttributeType: S
+      KeySchema:
+        - AttributeName: studentId
+          KeyType: HASH
+        - AttributeName: sessionId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI_StudentId_StartTime
+          KeySchema:
+            - AttributeName: studentId
+              KeyType: HASH
+            - AttributeName: startTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+Outputs:
+  TableName:
+    Value: !Ref StudentSessionsTable
+  TableArn:
+    Value: !GetAtt StudentSessionsTable.Arn

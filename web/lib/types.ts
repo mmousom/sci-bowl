@@ -51,3 +51,33 @@ export interface PracticeFilter {
   /** "All Rounds" or a specific Set_Round value */
   setRound: string;
 }
+
+/** A single session record as stored in DynamoDB. */
+export interface SessionRecord {
+  studentId: string;
+  sessionId: string;
+  topic: string;
+  startTime: string;       // ISO 8601 UTC
+  endTime: string | null;  // null while active
+  questionCount: number;
+}
+
+/** Payload returned by GET /api/stats. */
+export interface StatsPayload {
+  totalStudyTimeMinutes: number;
+  topicBreakdown: TopicStat[];
+  recentSessions: CompletedSession[];
+}
+
+export interface TopicStat {
+  topic: string;
+  totalMinutes: number;
+}
+
+export interface CompletedSession {
+  sessionId: string;
+  topic: string;
+  startTime: string;
+  endTime: string;
+  questionCount: number;
+}
