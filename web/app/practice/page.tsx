@@ -299,16 +299,21 @@ export default function PracticePage() {
   const { state: qState, load: loadQuestion, advance } = useQuestion();
   const { startSession, incrementQuestion } = useSessionTracker();
 
-  // Fetch a new question and start a session whenever the filter category changes
+  // Fetch a new question whenever the filter changes (including on mount)
   useEffect(() => {
     setIsAnswered(false);
     setLastCorrect(null);
     loadQuestion(filter);
-    if (filter.category !== "All Categories") {
-      startSession(filter.category);
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
+
+  // Start a session whenever the category changes — the hook handles
+  // auth-not-ready gracefully and will be re-triggered when auth loads
+  useEffect(() => {
+    const topic = filter.category === "All Categories" ? "General" : filter.category;
+    startSession(topic);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter.category]);
 
   // Read persisted score from localStorage on mount
   useEffect(() => {

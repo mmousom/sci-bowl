@@ -20,9 +20,10 @@ interface SessionTrackerActions {
  * don't cause re-renders. All API failures are swallowed silently.
  */
 export function useSessionTracker(): SessionTrackerActions {
-  const { data: authSession } = useSession();
+  const { data: authSession, status: authStatus } = useSession();
   const sessionIdRef = useRef<string | null>(null);
   const topicRef = useRef<string | null>(null);
+  const pendingTopicRef = useRef<string | null>(null);
 
   /** End the active session with a 5-second timeout. */
   const endSession = async (): Promise<void> => {
@@ -49,7 +50,12 @@ export function useSessionTracker(): SessionTrackerActions {
 
   /** Start a session for the given topic, ending any existing one first. */
   const startSession = async (topic: string): Promise<void> => {
-    if (!authSession?.user?.googleId) return;
+    if (!authSession?.user?.googleId) {
+      // Auth not ready yet — store the topic and retry when auth loads
+      pendingTopicRef.current = topic;
+      return;
+    }
+    pendingTopicRef.current = null;
     if (topicRef.current === topic && sessionIdRef.current) return;
 
     // End previous session if topic changed
@@ -88,6 +94,16 @@ export function useSessionTracker(): SessionTrackerActions {
       // Swallow silently
     });
   };
+
+  // When auth loads, start any session that was requested before auth was ready
+  useEffect(() => {
+    if (authStatus === "authenticated" && pendingTopicRef.current) {
+      const topic = pendingTopicRef.current;
+      pendingTopicRef.current = null;
+      startSession(topic);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authStatus]);
 
   // Register beforeunload to end session when tab closes
   useEffect(() => {
